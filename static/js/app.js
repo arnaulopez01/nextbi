@@ -254,7 +254,7 @@ function renderDashboard(config) {
         
         kpis.forEach(kpi => {
             const kpiCard = createKpiCard(kpi);
-            kpiCard.classList.add("flex-grow"); // Para que se estiren verticalmente
+            kpiCard.classList.add("flex-grow"); // Estirar verticalmente
             kpiCol.appendChild(kpiCard);
         });
         topSection.appendChild(kpiCol);
@@ -264,10 +264,10 @@ function renderDashboard(config) {
         setTimeout(() => initMap(mapId, mapComp), 100);
 
     } else {
-        // Fallback: SIN MAPA -> KPIs ocupan todo el ancho equilibradamente
+        // Fallback: SIN MAPA -> Layout 50/50 horizontal
         if (kpis.length > 0) {
             const kpiRow = document.createElement("div");
-            // CAMBIO AQUÍ: Usamos md:grid-cols-2 para que sean mitad y mitad
+            // CAMBIO: md:grid-cols-2 para que ocupen media pantalla cada uno
             kpiRow.className = "grid grid-cols-1 md:grid-cols-2 gap-6 mb-6"; 
             kpis.forEach(kpi => {
                 kpiRow.appendChild(createKpiCard(kpi));
@@ -298,13 +298,15 @@ function renderDashboard(config) {
 
     const btnFull = document.getElementById("btnFullscreen");
     if(btnFull) btnFull.classList.remove("hidden");
+
+    // Ejecutar ajuste de texto después de renderizar
+    setTimeout(autoFitText, 0);
 }
 
 function createKpiCard(comp) {
     const card = document.createElement("div");
     card.className = "bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-center items-center text-center hover:shadow-md transition overflow-hidden";
     
-    // Formateamos el valor
     const formattedValue = formatNumber(comp.data.value);
     
     card.innerHTML = `
@@ -313,14 +315,31 @@ function createKpiCard(comp) {
         </h3>
         
         <div id="kpi_val_${comp.id}" 
-             class="text-4xl lg:text-5xl font-extrabold text-slate-900 tracking-tight w-full truncate px-4" 
-             title="${formattedValue}">
+             class="kpi-fit-text font-extrabold text-slate-900 tracking-tight w-full px-2 whitespace-nowrap overflow-hidden"
+             style="font-size: 48px; line-height: 1.1;">
             ${formattedValue}
         </div>
         
         ${comp.description ? `<p class="text-xs text-slate-400 mt-2 truncate w-full px-4" title="${comp.description}">${comp.description}</p>` : ''}
     `;
     return card;
+}
+
+// --- AUTO-RESIZE TEXTO KPI ---
+function autoFitText() {
+    const elements = document.querySelectorAll('.kpi-fit-text');
+    elements.forEach(el => {
+        // 1. Restaurar tamaño original para medir
+        let size = 48; // Empezamos en ~3rem (48px)
+        el.style.fontSize = size + 'px';
+        
+        // 2. Reducir mientras el contenido (scrollWidth) sea mayor que la caja (clientWidth)
+        // Bajamos hasta un mínimo de 14px para que siga siendo legible
+        while (el.scrollWidth > el.clientWidth && size > 14) {
+            size -= 2; 
+            el.style.fontSize = size + 'px';
+        }
+    });
 }
 
 // --- ACTUALIZACIÓN DE DATOS ---
@@ -333,9 +352,12 @@ function updateComponentsData(components) {
             }
         } else if (comp.type === 'kpi') {
             const kpiValEl = document.getElementById("kpi_val_" + comp.id);
-            if (kpiValEl) kpiValEl.innerText = formatNumber(comp.data.value);
+            if (kpiValEl) {
+                kpiValEl.innerText = formatNumber(comp.data.value);
+                // Reseteamos estilo antes del autoFit
+                kpiValEl.style.fontSize = "48px";
+            }
         } else if (comp.type === 'map') {
-             // Actualización suave del mapa
              const map = mapInstances[comp.id];
              if (map && map.getSource('points')) {
                  const newGeoJSON = createGeoJSON(comp.data, comp.config);
@@ -350,6 +372,9 @@ function updateComponentsData(components) {
              }
         }
     });
+
+    // Ajustar textos tras actualizar datos
+    setTimeout(autoFitText, 0);
 }
 
 // --- HELPERS ---
@@ -405,13 +430,11 @@ function initChart(domId, comp, idx) {
         if (!pieColorMap[comp.id]) pieColorMap[comp.id] = {};
         
         let nextColorIdx = Object.keys(pieColorMap[comp.id]).length;
-        // Asumimos dim[0] es la categoría
         const catField = comp.data.dimensions[0]; 
         
         comp.data.source.forEach(row => {
             const name = row[catField];
             if (!pieColorMap[comp.id][name]) {
-                // Asignar siguiente color de la paleta
                 pieColorMap[comp.id][name] = colors[nextColorIdx % colors.length];
                 nextColorIdx++;
             }
@@ -444,7 +467,6 @@ function initChart(domId, comp, idx) {
                 borderRadius: isPie ? 5 : [4, 4, 0, 0],
                 borderColor: '#fff',
                 borderWidth: isPie ? 2 : 0,
-                // Si es Pie, consultamos la memoria, si no, color del tema
                 color: isPie ? (params) => {
                     return pieColorMap[comp.id][params.name] || themeColor;
                 } : themeColor
@@ -453,8 +475,7 @@ function initChart(domId, comp, idx) {
         }]
     };
     myChart.setOption(option);
-    window.addEventListener("resize", () => myChart.resize());
-
+    
     myChart.on('click', function(params) {
         if (comp.config && comp.config.x && params.name !== 'Otros') {
             applyFilter(comp.config.x, params.name);
@@ -463,7 +484,18 @@ function initChart(domId, comp, idx) {
     myChart.getZr().setCursorStyle('pointer');
 }
 
-// --- INIT MAPA (Instantáneo) ---
+// Listener Global de Resize para Charts y Textos
+window.addEventListener("resize", () => {
+    // Redimensionar gráficos
+    document.querySelectorAll('div[id^="chart_"]').forEach(el => {
+        const instance = echarts.getInstanceByDom(el);
+        if (instance) instance.resize();
+    });
+    // Redimensionar textos KPI
+    autoFitText();
+});
+
+// --- INIT MAPA ---
 function initMap(domId, comp) {
     const dom = document.getElementById(domId);
     if (!dom) return;
@@ -474,7 +506,6 @@ function initMap(domId, comp) {
         return;
     }
 
-    // Calcular bounds antes para zoom instantáneo
     const bounds = new maplibregl.LngLatBounds();
     geoJSON.features.forEach(feature => bounds.extend(feature.geometry.coordinates));
 
@@ -498,7 +529,7 @@ function initMap(domId, comp) {
                 maxzoom: 19
             }]
         },
-        bounds: bounds, // <--- CLAVE PARA NO ANIMAR
+        bounds: bounds,
         fitBoundsOptions: { padding: 80, maxZoom: 14 }
     });
 

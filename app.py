@@ -53,52 +53,36 @@ Genera un JSON con la siguiente estructura EXACTA de componentes (en este orden)
 2. **KPI 2 (Numérico):** Un indicador secundario o promedio relevante (ej: Ticket Medio, Coste Promedio).
 3. **GRÁFICO DE BARRAS:** Para comparar categorías principales (Top productos, Ventas por Vendedor, etc).
 4. **GRÁFICO CIRCULAR (PIE):** Para mostrar distribución o proporción (Share de mercado, Estado de pedidos).
-5. **MAPA (Solo si aplica):** SI Y SOLO SI detectas columnas de Latitud y Longitud en WGS84, añade un quinto componente tipo "map". Si no hay coordenadas claras, NO lo incluyas.
+5. **MAPA (Condicional):** SI detectas columnas geográficas, añade un quinto componente tipo "map".
+   - **IMPORTANTE:** Detecta tanto Latitud/Longitud (WGS84) COMO coordenadas proyectadas (X/Y, Easting/Northing, UTM).
+   - Si son coordenadas X/Y, mapea "lat" a la columna Y y "lon" a la columna X. El sistema las convertirá automáticamente.
 
 REGLAS DE ORO PARA TÍTULOS:
-- Usa lenguaje de negocio, NO nombres de columnas (ej: NO USAR "sum_ventas", USAR "Ventas Totales").
+- Usa lenguaje de negocio, NO nombres de columnas.
 - **IMPRESCINDIBLE:** Intenta deducir la unidad y ponla en el título entre paréntesis.
-  - Ej: "Capacidad de Almacenamiento (Litros)"
-  - Ej: "Facturación Global (EUR)"
-  - Ej: "Tiempo de Entrega (Días)"
-  - Ej: "Peso Total (kg)"
 
 ESTRUCTURA JSON DE RESPUESTA:
 {
-  "title": "Título del Dashboard (basado en el nombre del archivo)",
+  "title": "Título del Dashboard",
   "components": [
     {
-      "id": "kpi1",
-      "type": "kpi", 
-      "title": "Ingresos Totales (USD)",
-      "description": "Facturación acumulada del periodo",
+      "id": "kpi1", "type": "kpi", "title": "...", 
       "config": { "operation": "sum", "column": "amount" }
     },
+    { "id": "kpi2", "type": "kpi", "title": "...", "config": { "operation": "mean", "column": "price" } },
     {
-      "id": "kpi2",
-      "type": "kpi", 
-      "title": "Precio Promedio (USD)",
-      "config": { "operation": "mean", "column": "price" }
+      "id": "chart1", "type": "chart", "chart_type": "bar", "title": "...",
+      "config": { "x": "product", "y": "sales", "operation": "sum", "limit": 10 }
     },
     {
-      "id": "chart1",
-      "type": "chart",
-      "chart_type": "bar", 
-      "title": "Top 10 Productos por Ventas (Unidades)",
-      "config": { "x": "product_name", "y": "quantity", "operation": "sum", "limit": 10 }
-    },
-    {
-      "id": "chart2",
-      "type": "chart",
-      "chart_type": "pie", 
-      "title": "Distribución por Categoría (%)",
-      "config": { "x": "category", "y": "quantity", "operation": "sum" }
+      "id": "chart2", "type": "chart", "chart_type": "pie", "title": "...",
+      "config": { "x": "category", "y": "sales", "operation": "sum" }
     },
     {
       "id": "map1",
       "type": "map",
-      "title": "Ubicación de Clientes",
-      "config": { "lat": "latitude", "lon": "longitude", "label": "store_name" }
+      "title": "Mapa de Ubicaciones",
+      "config": { "lat": "Y_coord_column", "lon": "X_coord_column", "label": "store_name" }
     }
   ]
 }
