@@ -53,7 +53,7 @@ Genera un JSON con la siguiente estructura EXACTA de componentes (en este orden)
 2. **KPI 2 (Numérico):** Un indicador secundario o promedio relevante (ej: Ticket Medio, Coste Promedio).
 3. **GRÁFICO DE BARRAS:** Para comparar categorías principales (Top productos, Ventas por Vendedor, etc).
 4. **GRÁFICO CIRCULAR (PIE):** Para mostrar distribución o proporción (Share de mercado, Estado de pedidos).
-5. **MAPA (Solo si aplica):** SI Y SOLO SI detectas columnas de Latitud y Longitud, añade un quinto componente tipo "map". Si no hay coordenadas claras, NO lo incluyas.
+5. **MAPA (Solo si aplica):** SI Y SOLO SI detectas columnas de Latitud y Longitud en WGS84, añade un quinto componente tipo "map". Si no hay coordenadas claras, NO lo incluyas.
 
 REGLAS DE ORO PARA TÍTULOS:
 - Usa lenguaje de negocio, NO nombres de columnas (ej: NO USAR "sum_ventas", USAR "Ventas Totales").
