@@ -236,7 +236,7 @@ function renderDashboard(config) {
     // 2. RENDERIZAR PARTE SUPERIOR (Map + KPIs)
     if (maps.length > 0) {
         const topSection = document.createElement("div");
-        // Layout: Mapa (3/4) | KPIs (1/4)
+        // Layout CON MAPA: Mapa (3/4) | KPIs (1/4)
         topSection.className = "grid grid-cols-1 lg:grid-cols-4 gap-6 mb-6 h-auto lg:h-[500px]"; 
         
         // A. MAPA
@@ -245,17 +245,16 @@ function renderDashboard(config) {
         mapCard.className = "lg:col-span-3 bg-white p-1 rounded-2xl shadow-sm border border-slate-200 h-[400px] lg:h-full relative overflow-hidden";
         
         const mapId = "map_" + mapComp.id;
-        // Solo el contenedor, sin título
         mapCard.innerHTML = `<div id="${mapId}" class="w-full h-full rounded-xl bg-slate-100 relative"></div>`;
         topSection.appendChild(mapCard);
         
-        // B. KPIS
+        // B. KPIS (Verticales al lado del mapa)
         const kpiCol = document.createElement("div");
         kpiCol.className = "lg:col-span-1 flex flex-col gap-6 h-full";
         
         kpis.forEach(kpi => {
             const kpiCard = createKpiCard(kpi);
-            kpiCard.classList.add("flex-grow");
+            kpiCard.classList.add("flex-grow"); // Para que se estiren verticalmente
             kpiCol.appendChild(kpiCard);
         });
         topSection.appendChild(kpiCol);
@@ -265,10 +264,11 @@ function renderDashboard(config) {
         setTimeout(() => initMap(mapId, mapComp), 100);
 
     } else {
-        // Fallback: Si no hay mapa, KPIs horizontales
+        // Fallback: SIN MAPA -> KPIs ocupan todo el ancho equilibradamente
         if (kpis.length > 0) {
             const kpiRow = document.createElement("div");
-            kpiRow.className = "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-6";
+            // CAMBIO AQUÍ: Usamos md:grid-cols-2 para que sean mitad y mitad
+            kpiRow.className = "grid grid-cols-1 md:grid-cols-2 gap-6 mb-6"; 
             kpis.forEach(kpi => {
                 kpiRow.appendChild(createKpiCard(kpi));
             });
@@ -302,13 +302,23 @@ function renderDashboard(config) {
 
 function createKpiCard(comp) {
     const card = document.createElement("div");
-    card.className = "bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-center items-center text-center hover:shadow-md transition";
+    card.className = "bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-center items-center text-center hover:shadow-md transition overflow-hidden";
+    
+    // Formateamos el valor
+    const formattedValue = formatNumber(comp.data.value);
+    
     card.innerHTML = `
-        <h3 class="font-bold text-slate-500 text-sm uppercase tracking-wider mb-2">${comp.title}</h3>
-        <div id="kpi_val_${comp.id}" class="text-4xl lg:text-5xl font-extrabold text-slate-900 tracking-tight">
-            ${formatNumber(comp.data.value)}
+        <h3 class="font-bold text-slate-500 text-sm uppercase tracking-wider mb-2 truncate w-full px-2" title="${comp.title}">
+            ${comp.title}
+        </h3>
+        
+        <div id="kpi_val_${comp.id}" 
+             class="text-4xl lg:text-5xl font-extrabold text-slate-900 tracking-tight w-full truncate px-4" 
+             title="${formattedValue}">
+            ${formattedValue}
         </div>
-        ${comp.description ? `<p class="text-xs text-slate-400 mt-2">${comp.description}</p>` : ''}
+        
+        ${comp.description ? `<p class="text-xs text-slate-400 mt-2 truncate w-full px-4" title="${comp.description}">${comp.description}</p>` : ''}
     `;
     return card;
 }
