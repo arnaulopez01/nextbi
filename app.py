@@ -11,12 +11,15 @@ from flask_bcrypt import Bcrypt
 from google import genai
 from google.genai import types
 
-# IMPORTAMOS EL MÓDULO DE LÓGICA
+# Importamos la lógica robusta (asegúrate de que insights.py tenga el código que me pasaste)
 from insights import clean_dataframe, apply_global_filters, process_component_data
 
 load_dotenv()
 
-# --- CONFIGURACIÓN BÁSICA ---
+# ==========================================
+# CONFIGURACIÓN GENERAL
+# ==========================================
+
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "dev_secret_key_super_segura")
 bcrypt = Bcrypt(app)
@@ -36,30 +39,29 @@ for d in [DATA_DIR, UPLOAD_FOLDER, DASHBOARD_DIR]:
 if not os.path.exists(USERS_FILE):
     with open(USERS_FILE, 'w') as f: json.dump({}, f)
 
-# --- CONFIGURACIÓN GEMINI AI ---
+# ==========================================
+# CONFIGURACIÓN IA (GEMINI)
+# ==========================================
+
 MODEL_NAME = "gemini-2.5-flash" 
 api_key = os.getenv("GEMINI_API_KEY")
 client = genai.Client(api_key=api_key) if api_key else None
 
-# --- PROMPT MAESTRO ACTUALIZADO ---
+# PROMPT MAESTRO CON "INMUNIDAD DIPLOMÁTICA" PARA TUS COLUMNAS
 SYSTEM_PROMPT = """
-Eres un Director de Business Intelligence experto.
-Tu objetivo es crear un dashboard de alto impacto basado en un dataset.
+Eres un experto en Business Intelligence. Tu trabajo es traducir datos en configuraciones JSON.
 
-TU MISIÓN OBLIGATORIA:
-Genera un JSON con la siguiente estructura EXACTA de componentes (en este orden):
+INFORMACIÓN CRÍTICA SOBRE EL SISTEMA DE RENDERIZADO:
+1. **NO TE PREOCUPES POR LA CARDINALIDAD:** El sistema visual (frontend) tiene una función automática que agrupa valores pequeños en "Otros". 
+2. **TEXTO > IDs:** Para gráficos de Pie y Barras, los humanos prefieren leer "Hospital" (texto) antes que "COD_12" (ID). Si hay una columna descriptiva, ÚSALA aunque tenga muchos valores únicos.
+3. **OBEDIENCIA TOTAL:** Si el usuario menciona el nombre de una columna, ES UNA ORDEN DIRECTA. Ignora tus criterios de "mejor visualización" y usa esa columna exacta.
 
-1. **KPI 1 (Numérico):** El indicador más importante (ej: Ingresos Totales, Cantidad Neta).
-2. **KPI 2 (Numérico):** Un indicador secundario o promedio relevante (ej: Ticket Medio, Coste Promedio).
-3. **GRÁFICO DE BARRAS:** Para comparar categorías principales (Top productos, Ventas por Vendedor, etc).
-4. **GRÁFICO CIRCULAR (PIE):** Para mostrar distribución o proporción (Share de mercado, Estado de pedidos).
-5. **MAPA (Condicional):** SI detectas columnas geográficas, añade un quinto componente tipo "map".
-   - **IMPORTANTE:** Detecta tanto Latitud/Longitud (WGS84) COMO coordenadas proyectadas (X/Y, Easting/Northing, UTM).
-   - Si son coordenadas X/Y, mapea "lat" a la columna Y y "lon" a la columna X. El sistema las convertirá automáticamente.
-
-REGLAS DE ORO PARA TÍTULOS:
-- Usa lenguaje de negocio, NO nombres de columnas.
-- **IMPRESCINDIBLE:** Intenta deducir la unidad y ponla en el título entre paréntesis.
+TU MISIÓN:
+Genera un JSON con:
+1. **KPI 1 y 2:** Indicadores numéricos.
+2. **GRÁFICO BARRAS:** Comparativa.
+3. **GRÁFICO PIE:** Distribución.
+4. **MAPA:** Solo si hay lat/lon o X/Y.
 
 ESTRUCTURA JSON DE RESPUESTA:
 {
@@ -69,26 +71,49 @@ ESTRUCTURA JSON DE RESPUESTA:
       "id": "kpi1", "type": "kpi", "title": "...", 
       "config": { "operation": "sum", "column": "amount" }
     },
-    { "id": "kpi2", "type": "kpi", "title": "...", "config": { "operation": "mean", "column": "price" } },
     {
       "id": "chart1", "type": "chart", "chart_type": "bar", "title": "...",
-      "config": { "x": "product", "y": "sales", "operation": "sum", "limit": 10 }
+      "config": { "x": "COLUMNA_TEXTO", "y": "VALOR", "operation": "count", "limit": 10 }
     },
     {
       "id": "chart2", "type": "chart", "chart_type": "pie", "title": "...",
-      "config": { "x": "category", "y": "sales", "operation": "sum" }
+      "config": { "x": "COLUMNA_TEXTO", "y": "VALOR", "operation": "sum" }
     },
     {
-      "id": "map1",
-      "type": "map",
-      "title": "Mapa de Ubicaciones",
-      "config": { "lat": "Y_coord_column", "lon": "X_coord_column", "label": "store_name" }
+      "id": "map1", "type": "map", "title": "...",
+      "config": { "lat": "Y", "lon": "X", "label": "name" }
     }
   ]
 }
 """
 
-# ... [CLASES Y FUNCIONES DE USUARIO SE MANTIENEN IGUAL] ...
+# ==========================================
+# HELPERS
+# ==========================================
+
+def read_file_robust(filepath):
+    """Lectura resiliente de archivos."""
+    if filepath.endswith('.csv'):
+        encodings = ['utf-8', 'latin-1', 'cp1252']
+        for enc in encodings:
+            try:
+                df = pd.read_csv(filepath, engine='python', on_bad_lines='skip', encoding=enc)
+                df.columns = df.columns.astype(str).str.strip()
+                return df
+            except UnicodeDecodeError:
+                continue
+            except Exception as e:
+                raise e
+        raise ValueError("Error de codificación en CSV.")
+    else:
+        df = pd.read_excel(filepath)
+        df.columns = df.columns.astype(str).str.strip()
+        return df
+
+# ==========================================
+# GESTIÓN USUARIOS
+# ==========================================
+
 class User(UserMixin):
     def __init__(self, id, email, password_hash):
         self.id = id
@@ -105,23 +130,15 @@ def load_user(user_id):
     except: pass
     return None
 
-def save_new_user(email, password):
-    with open(USERS_FILE, 'r') as f: users = json.load(f)
-    for uid, data in users.items():
-        if data['email'] == email: return User(uid, data['email'], data['password'])
-    uid = str(uuid.uuid4())
-    pw = bcrypt.generate_password_hash(password).decode('utf-8')
-    users[uid] = {'email': email, 'password': pw}
-    with open(USERS_FILE, 'w') as f: json.dump(users, f)
-    return User(uid, email, pw)
-
 def get_user_by_email(email):
     with open(USERS_FILE, 'r') as f: users = json.load(f)
     for uid, data in users.items():
         if data['email'] == email: return User(uid, data['email'], data['password'])
     return None
 
-# --- RUTAS PRINCIPALES ---
+# ==========================================
+# RUTAS FRONTEND
+# ==========================================
 
 @app.route("/")
 def index():
@@ -145,7 +162,10 @@ def view_dashboard(dash_id):
     if not os.path.exists(path): return "Dashboard no encontrado", 404
     return render_template("share.html", dash_id=dash_id)
 
-# --- API AUTH ---
+# ==========================================
+# API AUTH
+# ==========================================
+
 @app.route("/api/login", methods=["POST"])
 def api_login():
     data = request.json
@@ -155,21 +175,15 @@ def api_login():
         return jsonify({"message": "OK", "redirect": url_for('dashboard')})
     return jsonify({"error": "Credenciales incorrectas"}), 401
 
-# @app.route("/api/register", methods=["POST"])
-# def api_register():
-#    data = request.json
-#    if get_user_by_email(data.get('email')): return jsonify({"error": "Usuario ya existe"}), 400
-#    user = save_new_user(data.get('email'), data.get('password'))
-#    login_user(user)
-#    return jsonify({"message": "OK", "redirect": url_for('dashboard')})
-
 @app.route("/api/logout", methods=["POST"])
 @login_required
 def logout():
     logout_user()
     return jsonify({"redirect": url_for('index')})
 
-# --- LÓGICA CORE ---
+# ==========================================
+# LÓGICA CORE (SUBIDA Y GENERACIÓN)
+# ==========================================
 
 @app.route("/upload_and_analyze", methods=["POST"])
 @login_required
@@ -177,42 +191,33 @@ def upload_and_analyze():
     if 'file' not in request.files: return jsonify({"error": "Falta archivo"}), 400
     file = request.files['file']
     
-    # ### NUEVO: VALIDACIÓN DE PESO (10MB) ###
-    # Movemos el cursor al final para ver cuánto ocupa
     file.seek(0, os.SEEK_END)
-    file_length = file.tell()
-    # Devolvemos el cursor al principio para poder guardarlo después
+    if file.tell() > 25 * 1024 * 1024:
+        return jsonify({"error": "Archivo > 25MB"}), 400
     file.seek(0)
-    
-    # 25 MB en bytes = 25 * 1024 * 1024 = 10,485,760 bytes
-    MAX_SIZE = 25 * 1024 * 1024 
-    
-    if file_length > MAX_SIZE:
-        return jsonify({
-            "error": "El archivo es demasiado grande. El límite es 10MB."
-        }), 400 # Devolvemos error 400 (Bad Request)
-    # ### FIN NUEVO ###
 
     user_path = os.path.join(UPLOAD_FOLDER, current_user.id)
     os.makedirs(user_path, exist_ok=True)
-    # Guardamos nombre original para contexto
+    
     original_name = file.filename
     filename = f"{uuid.uuid4().hex[:8]}_{original_name}"
     filepath = os.path.join(user_path, filename)
     file.save(filepath)
 
     try:
-        if filename.endswith('.csv'): df = pd.read_csv(filepath, engine='python')
-        else: df = pd.read_excel(filepath)
-        df.columns = df.columns.str.strip()
-        
+        df = read_file_robust(filepath)
         df = clean_dataframe(df)
         
-        summary = [f"Archivo: {original_name}", f"Registros: {len(df)}"]
+        # Generamos resumen para la IA
+        summary = [f"Archivo: {original_name}", f"Filas: {len(df)}"]
         for col in df.columns:
             dtype = str(df[col].dtype)
-            sample = [str(x)[:40] for x in df[col].dropna().head(3).tolist()]
-            summary.append(f"- '{col}' ({dtype}): Ejemplo: {sample}")
+            n_unique = df[col].nunique()
+            # Muestras más largas para que la IA entienda el contexto del texto
+            sample = [str(x)[:60] for x in df[col].dropna().head(3).tolist()]
+            
+            # INFO CLAVE: Le decimos cuántos únicos hay
+            summary.append(f"- {col} ({dtype}) [Únicos: {n_unique}]: {sample}")
             
         return jsonify({
             "summary": "\n".join(summary),
@@ -220,52 +225,62 @@ def upload_and_analyze():
             "original_name": original_name 
         })
     except Exception as e:
-        return jsonify({"error": f"Error leyendo archivo: {str(e)}"}), 500
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/generate_dashboard", methods=["POST"])
 @login_required
 def generate_dashboard():
-    if not client: return jsonify({"error": "Error Servidor: Falta GEMINI_API_KEY"}), 500
+    if not client: return jsonify({"error": "Falta API KEY"}), 500
 
     data = request.json
     full_path = os.path.join(UPLOAD_FOLDER, data.get('file_path'))
+    user_instruction = data.get('instruction', '')
     
-    # Recuperamos el nombre original del archivo para dárselo a la IA
-    # Si viene del front perfecto, si no, intentamos limpiarlo del path
-    filename_context = data.get('original_name', os.path.basename(full_path).split('_', 1)[-1])
-
     if not os.path.exists(full_path): return jsonify({"error": "Archivo perdido"}), 404
 
     try:
-        if full_path.endswith('.csv'): df = pd.read_csv(full_path, engine='python')
-        else: df = pd.read_excel(full_path)
-        df.columns = df.columns.str.strip()
+        df = read_file_robust(full_path)
+        df = clean_dataframe(df)
 
-        # Construimos el Prompt enriquecido
+        # --- LÓGICA DE FUERZA BRUTA (COLUMN ENFORCER) ---
+        # Detectamos si el usuario escribió el nombre de una columna
+        forced_cols = []
+        clean_instruction = user_instruction.upper().replace("_", " ") # Normalizar espacios
+        
+        for col in df.columns:
+            # Comparamos ignorando mayusculas y guiones bajos para ser flexibles
+            clean_col = col.upper().replace("_", " ")
+            if clean_col in clean_instruction:
+                forced_cols.append(col)
+        
+        system_msg_extra = ""
+        if forced_cols:
+            system_msg_extra = (
+                f"\n\n🚨 ALERTA DE PRIORIDAD MÁXIMA 🚨\n"
+                f"El usuario ha mencionado explícitamente estas columnas: {forced_cols}\n"
+                f"ESTÁ PROHIBIDO USAR OTRAS COLUMNAS. Si el usuario pidió un gráfico sobre '{forced_cols[0]}', "
+                f"debes configurar 'x': '{forced_cols[0]}' OBLIGATORIAMENTE.\n"
+                f"NO uses IDs o códigos (como CODI_...) si el usuario pidió el nombre (NOM_...).\n"
+                f"El sistema backend agrupará los datos automáticamente, NO intentes simplificarlos tú.\n"
+            )
+        # ------------------------------------------------
+
         prompt = (
-            f"NOMBRE DEL ARCHIVO: {filename_context}\n"
-            f"RESUMEN DE COLUMNAS Y DATOS:\n{data.get('summary')}\n"
-            f"INTENCIÓN DEL USUARIO: {data.get('instruction')}\n"
-            "Recuerda: 2 KPIs, 1 Barra, 1 Pie y Mapa (si hay coords)."
+            f"DATOS DEL ARCHIVO:\n{data.get('summary')}\n\n"
+            f"PETICIÓN DEL USUARIO: \"{user_instruction}\"\n"
+            f"{system_msg_extra}\n"
+            "Genera el JSON del dashboard ahora."
         )
         
-        response = None
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                response = client.models.generate_content(
-                    model=MODEL_NAME,
-                    contents=[{"role": "user", "parts": [{"text": prompt}]}],
-                    config=types.GenerateContentConfig(
-                        system_instruction=SYSTEM_PROMPT,
-                        response_mime_type="application/json",
-                        temperature=0.3
-                    )
-                )
-                break 
-            except Exception as e:
-                if attempt == max_retries - 1: raise e
-                time.sleep(1.5 ** attempt)
+        response = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=[{"role": "user", "parts": [{"text": prompt}]}],
+            config=types.GenerateContentConfig(
+                system_instruction=SYSTEM_PROMPT,
+                response_mime_type="application/json",
+                temperature=0.1 # Bajamos temperatura para que sea más "robot" obediente
+            )
+        )
 
         config_json = json.loads(response.text)
 
@@ -277,7 +292,7 @@ def generate_dashboard():
                 processed_components.append(comp)
 
         final_config = {
-            "title": config_json.get('title', f"Dashboard: {filename_context}"),
+            "title": config_json.get('title', "Dashboard Generado"),
             "components": processed_components
         }
 
@@ -296,28 +311,25 @@ def generate_dashboard():
         return jsonify(final_config)
 
     except Exception as e:
-        print(f"Error GenAI: {e}")
+        print(f"Error: {e}")
         return jsonify({"error": str(e)}), 500
 
-# --- RUTAS GESTIÓN Y FILTROS ---
+# ==========================================
+# RUTAS DE GESTIÓN (IGUAL QUE ANTES)
+# ==========================================
 
 @app.route("/api/dashboards", methods=["GET"])
 @login_required
 def list_dashboards():
     user_dir = os.path.join(DASHBOARD_DIR, current_user.id)
     if not os.path.exists(user_dir): return jsonify([])
-    
     items = []
     for f in os.listdir(user_dir):
         if f.endswith('.json'):
             try:
                 with open(os.path.join(user_dir, f)) as file:
                     d = json.load(file)
-                    items.append({
-                        "id": d['id'], 
-                        "title": d.get('config', {}).get('title', 'Sin Título'), 
-                        "created_at": d.get('created_at')
-                    })
+                    items.append({"id": d['id'], "title": d.get('config', {}).get('title'), "created_at": d.get('created_at')})
             except: pass
     items.sort(key=lambda x: x['created_at'], reverse=True)
     return jsonify(items)
@@ -326,47 +338,40 @@ def list_dashboards():
 @login_required
 def get_dashboard(dash_id):
     path = os.path.join(DASHBOARD_DIR, current_user.id, f"{dash_id}.json")
-    if not os.path.exists(path): return jsonify({"error": "No existe"}), 404
-    with open(path) as f: dash_data = json.load(f)
-    return jsonify(dash_data['config'])
+    if not os.path.exists(path): return jsonify({"error": "404"}), 404
+    with open(path) as f: return jsonify(json.load(f)['config'])
 
 @app.route("/api/dashboards/<dash_id>", methods=["DELETE"])
 @login_required
 def delete_dashboard(dash_id):
     path = os.path.join(DASHBOARD_DIR, current_user.id, f"{dash_id}.json")
-    if os.path.exists(path):
-        os.remove(path)
-        return jsonify({"message": "Borrado"})
-    return jsonify({"error": "No encontrado"}), 404
+    if os.path.exists(path): os.remove(path)
+    return jsonify({"message": "OK"})
 
 @app.route("/api/dashboards/<dash_id>/filter", methods=["POST"])
 @login_required
 def filter_dashboard(dash_id):
     filters = request.json.get('filters', {})
-    
     path = os.path.join(DASHBOARD_DIR, current_user.id, f"{dash_id}.json")
-    if not os.path.exists(path): return jsonify({"error": "Error carga"}), 404
+    if not os.path.exists(path): return jsonify({"error": "404"}), 404
     
     with open(path) as f: dash_data = json.load(f)
-    
     full_path = os.path.join(UPLOAD_FOLDER, dash_data['file_path'])
-    if full_path.endswith('.csv'): df = pd.read_csv(full_path, engine='python')
-    else: df = pd.read_excel(full_path)
-    df.columns = df.columns.str.strip()
     
-    df_filtered = apply_global_filters(df, filters)
-    
-    updated_components = []
-    for comp in dash_data['config']['components']:
-        new_data = process_component_data(df_filtered, comp)
-        if new_data:
-            comp['data'] = new_data
-            updated_components.append(comp)
-            
-    return jsonify({
-        "components": updated_components,
-        "active_filters": filters
-    })
+    try:
+        df = read_file_robust(full_path)
+        df = clean_dataframe(df)
+        df_filtered = apply_global_filters(df, filters)
+        
+        updated_components = []
+        for comp in dash_data['config']['components']:
+            new_data = process_component_data(df_filtered, comp)
+            if new_data:
+                comp['data'] = new_data
+                updated_components.append(comp)
+        return jsonify({"components": updated_components, "active_filters": filters})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)
