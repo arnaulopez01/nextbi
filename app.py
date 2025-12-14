@@ -177,6 +177,22 @@ def upload_and_analyze():
     if 'file' not in request.files: return jsonify({"error": "Falta archivo"}), 400
     file = request.files['file']
     
+    # ### NUEVO: VALIDACIÓN DE PESO (10MB) ###
+    # Movemos el cursor al final para ver cuánto ocupa
+    file.seek(0, os.SEEK_END)
+    file_length = file.tell()
+    # Devolvemos el cursor al principio para poder guardarlo después
+    file.seek(0)
+    
+    # 10 MB en bytes = 10 * 1024 * 1024 = 10,485,760 bytes
+    MAX_SIZE = 10 * 1024 * 1024 
+    
+    if file_length > MAX_SIZE:
+        return jsonify({
+            "error": "El archivo es demasiado grande. El límite es 10MB."
+        }), 400 # Devolvemos error 400 (Bad Request)
+    # ### FIN NUEVO ###
+
     user_path = os.path.join(UPLOAD_FOLDER, current_user.id)
     os.makedirs(user_path, exist_ok=True)
     # Guardamos nombre original para contexto
@@ -201,7 +217,7 @@ def upload_and_analyze():
         return jsonify({
             "summary": "\n".join(summary),
             "file_path": os.path.join(current_user.id, filename),
-            "original_name": original_name # Enviamos nombre limpio al front
+            "original_name": original_name 
         })
     except Exception as e:
         return jsonify({"error": f"Error leyendo archivo: {str(e)}"}), 500
