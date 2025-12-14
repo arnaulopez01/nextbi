@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import re
+import warnings
 from pyproj import Transformer
 
 def try_numeric_conversion(series):
@@ -35,7 +36,7 @@ def try_numeric_conversion(series):
 
 def clean_dataframe(df):
     """
-    Limpieza conservadora: Si parece texto, lo deja como texto.
+    Limpieza inteligente, resiliente y SIN ALERTAS de consola.
     """
     df = df.dropna(how='all').dropna(axis=1, how='all')
     df = df.replace([np.inf, -np.inf], np.nan)
@@ -43,10 +44,10 @@ def clean_dataframe(df):
     for col in df.columns:
         original_series = df[col].copy()
         
-        # Intentamos convertir
+        # --- 1. INTENTO NUMÉRICO ---
         numeric_series = try_numeric_conversion(df[col])
         
-        # Chequeo de seguridad: ¿Hemos destruido demasiada información?
+        # Chequeo de seguridad: ¿Hemos destruido información de texto?
         count_original = original_series.notna().sum()
         count_numeric = numeric_series.notna().sum()
         
@@ -60,12 +61,23 @@ def clean_dataframe(df):
         else:
             df[col] = numeric_series
 
-        # Intentar fechas solo si quedó como objeto
+        # --- 2. INTENTO DE FECHAS (OPTIMIZADO Y SILENCIOSO) ---
         if df[col].dtype == 'object':
             try:
-                temp_dates = pd.to_datetime(df[col], errors='coerce', dayfirst=True)
-                if temp_dates.notna().mean() > 0.6: 
-                    df[col] = temp_dates
+                # A. Tomamos una muestra para no procesar texto inútilmente
+                sample = df[col].dropna().astype(str).head(50)
+                if not sample.empty:
+                    # B. Silenciamos las alertas de Pandas solo para este bloque
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        # Probamos conversión en la muestra
+                        sample_dates = pd.to_datetime(sample, errors='coerce', dayfirst=True)
+                    
+                    # C. Si más del 50% de la muestra son fechas válidas, convertimos TODO
+                    if sample_dates.notna().mean() > 0.5:
+                        with warnings.catch_warnings():
+                            warnings.simplefilter("ignore")
+                            df[col] = pd.to_datetime(df[col], errors='coerce', dayfirst=True)
             except: pass
 
     return df
@@ -84,31 +96,29 @@ def process_component_data(df, component):
         config = component.get('config', {})
         chart_type = component.get('chart_type')
         
-        # --- 1. PROCESAR KPI (MEJORADO) ---
+        # --- KPI ---
         if c_type == 'kpi':
             op = config.get('operation', 'count')
             col = config.get('column')
             val = 0
             
-            # CASO A: NUNIQUE (Cuenta valores únicos, ideal para textos como "Barrios")
+            # CASO A: NUNIQUE (Cuenta categorías únicas)
             if op == 'nunique' and col and col in df.columns:
                 val = df[col].nunique()
             
-            # CASO B: COUNT (Cuenta registros no nulos)
+            # CASO B: COUNT (Cuenta registros)
             elif op == 'count':
                 if col and col in df.columns:
-                    val = df[col].count() # Cuenta no nulos de esa columna
+                    val = df[col].count()
                 else:
-                    val = len(df) # Cuenta filas totales
+                    val = len(df)
             
-            # CASO C: OPERACIONES MATEMÁTICAS (Sum, Mean, etc)
+            # CASO C: MATEMÁTICAS (Sum, Mean...)
             elif col and col in df.columns:
                 series = df[col]
-                
-                # Si piden sumar algo que parece texto, intentamos extraer números a la fuerza
+                # Forzar conversión numérica temporal si es necesario
                 if not pd.api.types.is_numeric_dtype(series):
                     series_converted = try_numeric_conversion(series)
-                    # Solo usamos la convertida si tiene sentido
                     if series_converted.notna().sum() > 0:
                         series = series_converted
 
@@ -121,14 +131,11 @@ def process_component_data(df, component):
                     val = 0
             
             if pd.isna(val) or val is None: val = 0
-            
-            # Formateo si es entero
-            if isinstance(val, float) and val.is_integer():
-                val = int(val)
+            if isinstance(val, float) and val.is_integer(): val = int(val)
 
             return {"value": val, "label": component.get('title')}
 
-        # --- 2. PROCESAR MAPA ---
+        # --- MAPA ---
         elif c_type == 'map':
             lat_col = config.get('lat')
             lon_col = config.get('lon')
@@ -145,7 +152,6 @@ def process_component_data(df, component):
 
                 if df_map.empty: return []
 
-                # Proyección
                 max_val = max(df_map[lat_col].abs().max(), df_map[lon_col].abs().max())
                 if max_val > 180:
                     try:
@@ -161,7 +167,7 @@ def process_component_data(df, component):
                 return df_map.head(1000).to_dict(orient='records')
             return []
 
-        # --- 3. PROCESAR GRÁFICO ---
+        # --- GRÁFICO ---
         elif c_type == 'chart':
             x = config.get('x')
             y = config.get('y')
