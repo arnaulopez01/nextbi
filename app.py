@@ -184,8 +184,8 @@ def upload_and_analyze():
     # Devolvemos el cursor al principio para poder guardarlo después
     file.seek(0)
     
-    # 10 MB en bytes = 10 * 1024 * 1024 = 10,485,760 bytes
-    MAX_SIZE = 10 * 1024 * 1024 
+    # 25 MB en bytes = 25 * 1024 * 1024 = 10,485,760 bytes
+    MAX_SIZE = 25 * 1024 * 1024 
     
     if file_length > MAX_SIZE:
         return jsonify({
